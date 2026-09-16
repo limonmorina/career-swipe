@@ -7,11 +7,15 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test:session": "tsx src/scrapers/testSession.ts",
+    "test:scraper": "tsx src/scrapers/testScraper.ts",
+    "start:worker": "tsx src/queues/jobQueue.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
     "bullmq": "^6.3.6",
+    "dotenv": "^17.4.2",
     "ioredis": "^6.0.0",
     "pdfkit": "^0.20.2",
     "playwright": "^1.55.0"

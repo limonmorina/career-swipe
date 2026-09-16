@@ -1,13 +1,11 @@
-﻿/**
- * Playwright automation scripts live here.
- * Prefer imports from ../scrapers/linkedinClient.js going forward.
- */
+/** @deprecated Import from `../scrapers/linkedinClient.js` instead. */
 export {
   closeAuthenticatedContext,
   closeLinkedInSession,
   createAuthenticatedContext,
   createLinkedInSession,
   verifyLinkedInSession,
+  type AuthenticatedContextConfig,
   type AuthenticatedLinkedInContext,
   type LinkedInSession,
 } from '../scrapers/linkedinClient.js';
