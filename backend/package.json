@@ -10,9 +10,11 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:session": "tsx src/scrapers/testSession.ts",
     "test:scraper": "tsx src/scrapers/testScraper.ts",
-    "start:worker": "tsx src/queues/jobQueue.ts"
+    "start:worker": "tsx src/queues/jobQueue.ts",
+    "start:apply-worker": "tsx src/queues/applicationWorker.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.23.0",
     "@supabase/supabase-js": "^2.116.0",
     "bullmq": "^6.3.6",
     "dotenv": "^17.4.2",
