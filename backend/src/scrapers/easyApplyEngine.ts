@@ -7,6 +7,12 @@ import {
   solveScreeningQuestion,
   type SolvedAnswer,
 } from './questionSolver.js';
+import {
+  checkDailyApplicationCap,
+  pauseBeforeInteraction,
+  randomDelay,
+} from './rateLimiter.js';
+import { capturePlaywrightFailure } from '../lib/logger.js';
 
 export interface EasyApplyOptions {
   jobId: string;
@@ -94,10 +100,12 @@ async function clickFirst(
   for (const selector of SELECTORS[selectorKey]) {
     try {
       const locator = (root ?? page).locator(selector).first();
+      await pauseBeforeInteraction(page);
       await withSelectorLog(page, selectorKey, selector, async () => {
         await locator.waitFor({ state: 'visible', timeout: timeoutMs });
         await locator.click({ timeout: timeoutMs });
       });
+      await randomDelay(600, 1400);
       return true;
     } catch {
       // try next
@@ -381,7 +389,7 @@ async function fillVisibleFields(
       });
 
       await applyAnswer(page, control, answer, optionLabels);
-      await page.waitForTimeout(200);
+      await randomDelay(250, 700);
     } catch (error) {
       console.warn('Failed to fill Easy Apply field', {
         index: i,
@@ -425,8 +433,11 @@ export async function runEasyApply(
   const maxSteps = options.maxSteps ?? 12;
   const jobUrl = `https://www.linkedin.com/jobs/view/${options.jobId}/`;
 
+  await checkDailyApplicationCap(options.profile.userId);
+
   try {
     await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await randomDelay(1200, 2500);
   } catch (error) {
     console.error('Playwright selector failed', {
       selectorKey: 'jobPage',
@@ -434,17 +445,38 @@ export async function runEasyApply(
       url: page.url(),
       error,
     });
+    await capturePlaywrightFailure(page, {
+      jobId: options.jobId,
+      error,
+      selectorKey: 'jobPage',
+      selector: jobUrl,
+      stage: 'easy-apply-navigate',
+    }).catch(() => undefined);
     throw error;
   }
 
   const launched = await clickFirst(page, 'easyApplyButton', undefined, 20_000);
   if (!launched) {
-    throw new Error('Easy Apply button not found on job page');
+    const error = new Error('Easy Apply button not found on job page');
+    await capturePlaywrightFailure(page, {
+      jobId: options.jobId,
+      error,
+      selectorKey: 'easyApplyButton',
+      stage: 'easy-apply-launch',
+    }).catch(() => undefined);
+    throw error;
   }
 
   const modal = await findModal(page);
   if (!modal) {
-    throw new Error('Easy Apply modal did not appear');
+    const error = new Error('Easy Apply modal did not appear');
+    await capturePlaywrightFailure(page, {
+      jobId: options.jobId,
+      error,
+      selectorKey: 'modal',
+      stage: 'easy-apply-modal',
+    }).catch(() => undefined);
+    throw error;
   }
 
   let stepsCompleted = 0;
@@ -452,6 +484,7 @@ export async function runEasyApply(
 
   while (stepsCompleted < maxSteps) {
     stepsCompleted += 1;
+    await randomDelay(800, 1800);
 
     if (options.resumeUrl && !resumeAttached) {
       resumeAttached = await attachResume(
@@ -492,10 +525,17 @@ export async function runEasyApply(
 
       const submitted = await clickFirst(page, 'submitButton', modal, 8_000);
       if (!submitted) {
-        throw new Error('Submit application button not clickable');
+        const error = new Error('Submit application button not clickable');
+        await capturePlaywrightFailure(page, {
+          jobId: options.jobId,
+          error,
+          selectorKey: 'submitButton',
+          stage: 'easy-apply-submit',
+        }).catch(() => undefined);
+        throw error;
       }
 
-      await page.waitForTimeout(2_000);
+      await randomDelay(1500, 3000);
       await clickFirst(page, 'dismiss', undefined, 5_000).catch(() => false);
 
       return {
@@ -511,10 +551,17 @@ export async function runEasyApply(
     await fillVisibleFields(page, modal, options);
     const retry = await advanceStep(page, modal);
     if (retry === 'stuck') {
-      throw new Error('Easy Apply navigation stuck; no Next/Submit button found');
+      const error = new Error(
+        'Easy Apply navigation stuck; no Next/Submit button found'
+      );
+      await capturePlaywrightFailure(page, {
+        jobId: options.jobId,
+        error,
+        stage: 'easy-apply-stuck',
+      }).catch(() => undefined);
+      throw error;
     }
     if (retry === 'submit') {
-      // loop will handle submit on next iteration via isSubmitStep
       continue;
     }
   }

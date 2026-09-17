@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
@@ -11,6 +10,14 @@ import {
   verifyLinkedInSession,
 } from '../scrapers/linkedinClient.js';
 import { runEasyApply } from '../scrapers/easyApplyEngine.js';
+import {
+  DailyCapReachedError,
+  checkDailyApplicationCap,
+} from '../scrapers/rateLimiter.js';
+import {
+  capturePlaywrightFailure,
+  logCapLimitNotice,
+} from '../lib/logger.js';
 import type {
   Education,
   ExtendedPreferences,
@@ -24,7 +31,6 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const QUEUE_NAME = 'apply-job';
-const ERROR_DIR = path.resolve(__dirname, '../../logs/errors');
 
 export type ApplyJobPayload = {
   jobId: string;
@@ -105,20 +111,6 @@ async function resolveResumeUrl(
   return data.publicUrl || null;
 }
 
-async function saveErrorScreenshot(
-  pageScreenshot: () => Promise<Buffer>,
-  linkedInJobId: string
-): Promise<string> {
-  await fs.mkdir(ERROR_DIR, { recursive: true });
-  const screenshotPath = path.join(
-    ERROR_DIR,
-    `${linkedInJobId}-${Date.now()}.png`
-  );
-  const buffer = await pageScreenshot();
-  await fs.writeFile(screenshotPath, buffer);
-  return screenshotPath;
-}
-
 const connection = getRedisConnection();
 
 export const applyJobQueue = new Queue<ApplyJobPayload>(QUEUE_NAME, {
@@ -173,6 +165,20 @@ export async function processApplyJob(
     (jobRow.resume_url as string) || null
   );
 
+  try {
+    await checkDailyApplicationCap(userId);
+  } catch (error) {
+    if (error instanceof DailyCapReachedError) {
+      await logCapLimitNotice(linkedInJobId, error.message);
+      return {
+        status: 'capped',
+        submitted: false,
+        dryRun: isDryRunFlag(dryRun),
+      };
+    }
+    throw error;
+  }
+
   const session = await createAuthenticatedContext({ headless });
 
   try {
@@ -215,18 +221,27 @@ export async function processApplyJob(
       dryRun: result.dryRun,
     };
   } catch (error) {
+    if (error instanceof DailyCapReachedError) {
+      await logCapLimitNotice(linkedInJobId, error.message);
+      return {
+        status: 'capped',
+        submitted: false,
+        dryRun: isDryRunFlag(dryRun),
+      };
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     console.error('apply-job failed', { linkedInJobId, userId, message });
 
-    let screenshotPath: string | undefined;
     try {
-      screenshotPath = await saveErrorScreenshot(
-        () => session.page.screenshot({ fullPage: true }),
-        linkedInJobId
-      );
-      console.error('Saved apply error screenshot', { screenshotPath });
+      await capturePlaywrightFailure(session.page, {
+        jobId: linkedInJobId,
+        error,
+        stage: 'apply-worker',
+        extra: { userId },
+      });
     } catch (screenshotError) {
-      console.error('Failed to capture apply error screenshot', screenshotError);
+      console.error('Failed to capture apply error diagnostics', screenshotError);
     }
 
     await supabase
@@ -242,6 +257,11 @@ export async function processApplyJob(
   } finally {
     await closeAuthenticatedContext(session);
   }
+}
+
+function isDryRunFlag(explicit?: boolean): boolean {
+  if (typeof explicit === 'boolean') return explicit;
+  return String(process.env.DRY_RUN || 'true').toLowerCase() !== 'false';
 }
 
 export const applyJobWorker = new Worker<ApplyJobPayload>(

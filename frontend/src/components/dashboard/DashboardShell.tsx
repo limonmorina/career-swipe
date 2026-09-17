@@ -38,7 +38,15 @@ export function DashboardShell({ profile }: DashboardShellProps) {
           throw new Error(payload.error || 'Failed to load jobs');
         }
         if (!cancelled) {
-          setJobs(payload.data as DiscoveredJob[]);
+          const loaded = payload.data as DiscoveredJob[];
+          setJobs(loaded);
+          const scores: Record<string, number> = {};
+          for (const job of loaded) {
+            if (typeof job.matchScore === 'number') {
+              scores[job.id] = job.matchScore;
+            }
+          }
+          setMatchScores(scores);
         }
       } catch (err) {
         if (!cancelled) {
@@ -118,7 +126,11 @@ export function DashboardShell({ profile }: DashboardShellProps) {
       setJobs((prev) =>
         prev.map((job) =>
           job.id === selectedJob.id
-            ? { ...job, status: job.status === 'discovered' ? 'tailored' : job.status }
+            ? {
+                ...job,
+                status: job.status === 'discovered' ? 'tailored' : job.status,
+                matchScore: result.matchScore,
+              }
             : job
         )
       );
@@ -127,9 +139,21 @@ export function DashboardShell({ profile }: DashboardShellProps) {
           ? {
               ...prev,
               status: prev.status === 'discovered' ? 'tailored' : prev.status,
+              matchScore: result.matchScore,
             }
           : prev
       );
+
+      // Persist match score for analytics
+      fetch('/api/jobs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedJob.id,
+          matchScore: result.matchScore,
+          status: 'tailored',
+        }),
+      }).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analyze failed');
     } finally {
@@ -152,16 +176,26 @@ export function DashboardShell({ profile }: DashboardShellProps) {
     <div className="min-h-full bg-[radial-gradient(circle_at_top_left,_#dff3ef_0%,_#f7f5f1_42%,_#efeae2_100%)]">
       <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-800">
-            CareerSwipe
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl">
-            Job Feed & Match Review
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 sm:text-base">
-            Review discovered roles, run Gemini match analysis, accept resume edits,
-            and approve applications for automation.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-800">
+                CareerSwipe
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl">
+                Job Feed & Match Review
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 sm:text-base">
+                Review discovered roles, run Gemini match analysis, accept resume edits,
+                and approve applications for automation.
+              </p>
+            </div>
+            <a
+              href="/dashboard/analytics"
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+            >
+              Analytics
+            </a>
+          </div>
         </header>
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

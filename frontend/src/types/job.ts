@@ -9,6 +9,7 @@ export interface DiscoveredJob {
   isEasyApply: boolean;
   status: string;
   createdAt: string;
+  matchScore?: number | null;
 }
 
 export type JobFeedFilter = 'all' | 'easy_apply' | 'reviewed';

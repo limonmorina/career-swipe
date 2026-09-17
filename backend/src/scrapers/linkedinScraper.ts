@@ -1,5 +1,7 @@
 import type { Page, Locator } from 'playwright';
 import type { JobSearchOptions, ScrapedJob, SearchOptions } from '../types/job.js';
+import { pauseBeforeInteraction, randomDelay } from './rateLimiter.js';
+import { capturePlaywrightFailure } from '../lib/logger.js';
 
 const SELECTORS = {
   resultsList: [
@@ -326,6 +328,7 @@ export async function scrapeJobSearchResults(
   }
 
   await scrollResultsList(page, resultsList);
+  await randomDelay(800, 1800);
 
   const cards = await collectJobCardLocators(page);
   const jobs: ScrapedJob[] = [];
@@ -351,16 +354,24 @@ export async function scrapeJobSearchResults(
     seen.add(meta.jobId);
 
     try {
+      await pauseBeforeInteraction(page);
       await withSelectorLog(page, 'jobCards', 'card-click', async () => {
         await card.click({ timeout: 5_000 });
       });
-      await page.waitForTimeout(1_200);
+      await randomDelay(900, 1800);
     } catch (error) {
       console.warn('Failed to open job detail pane; continuing without description', {
         jobId: meta.jobId,
         url: page.url(),
         error,
       });
+      await capturePlaywrightFailure(page, {
+        jobId: meta.jobId,
+        error,
+        selectorKey: 'jobCards',
+        selector: 'card-click',
+        stage: 'discovery-open-card',
+      }).catch(() => undefined);
     }
 
     let description = '';
@@ -372,6 +383,12 @@ export async function scrapeJobSearchResults(
         url: page.url(),
         error,
       });
+      await capturePlaywrightFailure(page, {
+        jobId: meta.jobId,
+        error,
+        selectorKey: 'description',
+        stage: 'discovery-description',
+      }).catch(() => undefined);
     }
 
     const postedAt = await extractPostedAt(page);
@@ -386,6 +403,8 @@ export async function scrapeJobSearchResults(
       isEasyApply: meta.isEasyApply,
       postedAt,
     });
+
+    await randomDelay(700, 1600);
   }
 
   return jobs;
